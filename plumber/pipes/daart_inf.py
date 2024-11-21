@@ -15,14 +15,14 @@ device = 'cpu'
 
 class DaartInf(Pipe):
 
-    def __init__(self, label: str, path) -> None:
+    def __init__(self, label: str, path, model_name) -> None:
         super().__init__(label)
 
         self.path = path
 
         # Load the Model
-        model_dir = path + '/daart_binary'
-        model_file = os.path.join(model_dir, 'best_val_model.pt')
+        model_dir = path + '/daart_binary_2'
+        model_file = os.path.join(model_dir, f'{model_name}.pt')
 
         hparams_file = os.path.join(model_dir, 'hparams.yaml')
         hparams = yaml.safe_load(open(hparams_file, 'rb'))
