@@ -7,11 +7,11 @@ import numpy as np
 
 from daart.models import Segmenter
 
-# if torch.cuda.is_available():
-#     device = 'cuda'
-# else:
-#     device = 'cpu'
-device = 'cpu'
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
+# device = 'cpu'
 
 class DaartInf(Pipe):
 
@@ -21,7 +21,7 @@ class DaartInf(Pipe):
         self.path = path
 
         # Load the Model
-        model_dir = path + '/daart_binary_2'
+        model_dir = path + '/daart_models'
         model_file = os.path.join(model_dir, f'{model_name}.pt')
 
         hparams_file = os.path.join(model_dir, 'hparams.yaml')

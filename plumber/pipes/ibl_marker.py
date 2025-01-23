@@ -14,11 +14,11 @@ from daart.data import DataGenerator
 from daart.models import Segmenter
 from daart.transforms import ZScore
 
-# if torch.cuda.is_available():
-#     device = 'cuda'
-# else:
-#     device = 'cpu'
-device = 'cpu'
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
+# device = 'cpu'
 
 # Connect to the IBL database
 ONE.setup(base_url='https://openalyx.internationalbrainlab.org', silent=True)
@@ -26,13 +26,14 @@ one = ONE(password='international')
 
 class IBLMarkerExtractor(Pipe):
 
-    def __init__(self, label: str, path, smooth) -> None:
+    def __init__(self, label: str, path, smooth, mtype = "DLC") -> None:
         super().__init__(label)
         self.path = path
         self.l_thresh = 0.0
         self.view = 'left'
         self.paw = 'paw_r'
         self.smooth = smooth
+        self.mtype = mtype
 
     def pipe(self, inputs):
         eid = inputs["eid_stream"]["eid"]
@@ -40,6 +41,7 @@ class IBLMarkerExtractor(Pipe):
 
         file = self.extract_marker_data(
             eid=eid, 
+            mtype=self.mtype,
             l_thresh=self.l_thresh, 
             view=self.view, 
             paw=self.paw, 
@@ -52,14 +54,26 @@ class IBLMarkerExtractor(Pipe):
             path=self.path)
 
     # Function to extract and/or smooth ibl data
-    def extract_marker_data(self, eid, l_thresh, view, paw, smooth, path):
+    def extract_marker_data(self, eid, mtype, l_thresh, view, paw, smooth, path):
         #sess_id = dropbox_marker_paths[eid]
-
-        # Load the pose data
+        # type = 'DLC' or 'LP'
+        
         sl = SessionLoader(one=one, eid=eid)
-        sl.load_pose(likelihood_thr=l_thresh, views=[view])
-        times = sl.pose[f'{view}Camera'].times.to_numpy()
-        markers = sl.pose[f'{view}Camera'].loc[:, (f'{paw}_x', f'{paw}_y')].to_numpy()  
+
+        if mtype == 'DLC':
+            # Load the pose data
+            sl.load_pose(likelihood_thr=l_thresh, views=[view])
+            times = sl.pose[f'{view}Camera'].times.to_numpy()
+            markers = sl.pose[f'{view}Camera'].loc[:, (f'{paw}_x', f'{paw}_y')].to_numpy()  
+        
+        elif mtype == 'LP':
+            d = one.load_object(eid, 'leftCamera', attribute=['lightningPose', 'times'], query_type='remote')
+            times = d['times']
+            markers = d['lightningPose'].loc[:, (f'{paw}_x', f'{paw}_y')].to_numpy()
+
+        else:
+            raise ValueError('mtype must be either "DLC" or "LP"')
+
 
         # Load wheel data
         sl.load_wheel()
@@ -149,7 +163,7 @@ class IBLMarkerExtractor(Pipe):
     # Function to create data generator
     def create_data_generator(self, sess_id, input_file, path):
 
-        model_dir = path + '/daart_binary'
+        model_dir = path + '/daart_models'
         
         hparams_file = os.path.join(model_dir, 'hparams.yaml')
         hparams = yaml.safe_load(open(hparams_file, 'rb'))
