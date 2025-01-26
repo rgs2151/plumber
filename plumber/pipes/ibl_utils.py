@@ -73,12 +73,3 @@ def read_markers(one, eid, sl, mtype, l_thresh, view, paw):
         raise ValueError('mtype must be either "DLC" or "LP"')
     
     return times, markers
-
-
-
-
-
-
-
-
-#EOD

@@ -38,7 +38,7 @@ frame_counter_duration = 20
 
 l_thresh = 0.0
 view = 'left'
-paw = 'paw_r'
+paw = 'paw_l'
 colors = ['red', 'blue', 'green', 'purple']
 state_labels = ['Still', 'Move', 'Wheel Turn', 'Groom']
 state_keys = {1: 'Still', 2: 'Move', 3: 'Wheel Turn', 4: 'Groom'}
