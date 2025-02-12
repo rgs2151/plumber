@@ -126,4 +126,7 @@ class IBLEidStream(Stream):
     def __init__(self, label: str, idx) -> None:
         super().__init__(label)
         
-        self.data[label] = { 'eid': eids[idx], 'sess': dropbox_marker_paths[eids[idx]] }
+        if type(idx) == int:
+            self.data[label] = { 'eid': eids[idx], 'sess': dropbox_marker_paths[eids[idx]] }
+        else:
+            self.data[label] = { 'eid': idx, 'sess': dropbox_marker_paths[idx] }
