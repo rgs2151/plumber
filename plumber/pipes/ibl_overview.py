@@ -9,6 +9,7 @@ import pandas as pd
 # Science imports
 from scipy.interpolate import interp1d
 from scipy import stats
+from sklearn.preprocessing import QuantileTransformer, MinMaxScaler, PowerTransformer
 
 # Plotting imports
 import matplotlib.pyplot as plt
@@ -18,6 +19,7 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
 from matplotlib.colors import ListedColormap
 import matplotlib.ticker as ticker
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 # Video imports
 import seaborn as sns
@@ -34,11 +36,11 @@ one = ONE(password='international')
 
 model_to_use = 'e_mode'
 silence_window = 5
-frame_counter_duration = 20
+frame_counter_duration = 10
 
 l_thresh = 0.0
-view = 'left'
-paw = 'paw_l'
+# view = 'left'
+# paw = 'paw_l'
 colors = ['red', 'blue', 'green', 'purple']
 state_labels = ['Still', 'Move', 'Wheel Turn', 'Groom']
 state_keys = {1: 'Still', 2: 'Move', 3: 'Wheel Turn', 4: 'Groom'}
@@ -46,10 +48,16 @@ state_map = np.vectorize(lambda x: state_keys[x])
 
 
 class OverviewPlotter(Pipe):
-    def __init__(self, label: str, artifact_path, mtype, eid) -> None:
+    def __init__(self, label: str, artifact_path, mtype, eid, view, paw) -> None:
         super().__init__(label)
         self.mtype = mtype
         self.eid = eid
+        
+        # left or right
+        self.view = view
+        # paw_l or paw_r
+        self.paw = paw
+        
         self.artifact_path = artifact_path
         self.export_path = self.artifact_path + '/session_overviews/'
         # Make this directory if it doesn't exist
@@ -60,15 +68,15 @@ class OverviewPlotter(Pipe):
         # self.eid = inputs["eid_stream"]["eid"]
         self.preds = inputs["ens"]
 
-        vid_url = vidio.url_from_eid(self.eid, one=one)[view]
+        vid_url = vidio.url_from_eid(self.eid, one=one)[self.view]
         fps, frame = get_video_frames(vid_url)
 
         # Get the data
-        marker_data, cam_times = extract_marker_data(self.eid, self.mtype)
+        marker_data, cam_times = extract_marker_data(self.eid, self.mtype, self.view, self.paw)
         data_df, tframes = gen_data_df(marker_data, self.preds, cam_times)
         sd_df, durations = duration_data(data_df, tframes)
         interval_df = interval_data(data_df, self.eid)
-        er, vr = raster_data(interval_df, data_df)
+        er, vr = raster_data(interval_df, data_df, fps)
         still_to_wheel_turn_frames, wheel_turn_to_still_frames, still_to_move_frames, move_to_still_frames = wheel_data(data_df)
         
         fig = plt.figure(figsize=(25, 12), dpi=300)  # Adjust the figure size as needed
@@ -82,15 +90,17 @@ class OverviewPlotter(Pipe):
         )  # Create an 8x4 grid
     
         # Plots
-        plot_paws_and_speed(gs, fig, data_df, frame, self.eid, cbar=False)
+        plot_paws_and_speed(gs, fig, data_df, frame, self.eid, self.view, self.paw, self.mtype, cbar=True)
         plot_state_durations(gs, fig, durations)
         plot_total_duration(gs, fig, durations)
-        plot_raster(er, vr, gs, fig, xlim=120, fps=fps)
+        plot_raster(er, vr, gs, fig, xlim=2, fps=fps)
         plot_vert_info(gs, fig, interval_df["choice_data"], interval_df["trial_duration"])
         plot_wheel_speed(gs, fig, still_to_wheel_turn_frames, wheel_turn_to_still_frames, data_df, fps)
         plot_paw_speed(gs, fig, still_to_wheel_turn_frames, wheel_turn_to_still_frames, still_to_move_frames, move_to_still_frames, data_df, fps)
         plt_ens_var_hist(gs, fig, data_df)
-        fig.suptitle(f"Overview of eid: {self.eid}", fontsize=14, y=0.95)
+        title_cam = self.view
+        title_paw = "left" if self.paw == "paw_l" else "right"
+        fig.suptitle(f"Overview of eid: {self.eid} ({title_cam} camera, {title_paw} paw)", fontsize=14, y=0.95)
 
         # Save the figure to the export path
         output_path = self.export_path + f'{self.eid}_overview.jpg'
@@ -122,7 +132,7 @@ def extract_transition_data_with_window(frames, data, data_col, pre_window=30, p
             transition_data.append(data.iloc[frame - pre_window:frame + post_window][data_col].values)
     return np.array(transition_data)
 
-def extract_marker_data(eid, mtype):
+def extract_marker_data(eid, mtype, view, paw):
     #sess_id = dropbox_marker_paths[eid]
 
     # Load the pose data
@@ -258,16 +268,16 @@ def interval_data(data_df, eid):
 
     return interval_df
 
-def raster_data(interval_df, data_df):
+def raster_data(interval_df, data_df, fps):
     # temporary holder for the data
     ens_raster_holder = np.zeros((len(interval_df), (interval_df["frame_end"] - interval_df["frame_start"]).max()))
     ens_raster_holder[:] = np.nan
     var_raster_holder = np.zeros_like(ens_raster_holder)
     var_raster_holder[:] = np.nan
 
+    previous_space = int(fps//2)
     for idx, row in interval_df.iterrows():
         # start = int(row["frame_start"])
-        previous_space = 20
         start = int(row["frame_fmt"])
         end = int(row["frame_end"])
         class_to_int = {label: i for i, label in enumerate(state_labels)}
@@ -320,7 +330,7 @@ def wheel_data(data_df):
 # Plotting functions
 ####################################################
 
-def plot_paws_and_speed(gs, fig, data_df, frame, eid_inferred, cbar=False):
+def plot_paws_and_speed(gs, fig, data_df, frame, eid_inferred,  view, paw, mtype, cbar=True):
 
     ############# LOCATION #############
     ax_paws = [(0, 0), (0, 1), (0, 2), (0, 3)]    # Axis for the Paws
@@ -329,13 +339,23 @@ def plot_paws_and_speed(gs, fig, data_df, frame, eid_inferred, cbar=False):
     frame_marker_df = data_df.copy()
 
     sl = SessionLoader(one=one, eid=eid_inferred)
-    sl.load_pose(likelihood_thr=l_thresh, views=[view])
-    marker_px = sl.pose[f'{view}Camera'].loc[:, (f'{paw}_x', f'{paw}_y')].to_numpy()[:frame_marker_df.shape[0], :].T
+
+    _, markers = read_markers(one, eid_inferred, sl, mtype, l_thresh, view, paw)
+    marker_px = markers[:frame_marker_df.shape[0], :].T
 
     frame_marker_df['paw_x_pos'] = marker_px[0]
     frame_marker_df['paw_y_pos'] = marker_px[1]
-    frame_marker_df['paw_speed_normalized'] = np.clip(frame_marker_df['paw_speed']*9, 0, 30)
+    # frame_marker_df['paw_speed_normalized'] = np.clip(frame_marker_df['paw_speed']*9, 0, 30)
+    frame_marker_df['paw_speed_normalized'] = np.log(frame_marker_df['paw_speed']) / np.log(frame_marker_df['paw_speed']).max()
 
+    # # Using Box-Cox requires all positive values. If your data includes zeros, consider Yeo-Johnson.
+    # pt = PowerTransformer(method='box-cox', standardize=False)
+    # transformed_speed = pt.fit_transform(frame_marker_df['paw_speed'].values.reshape(-1, 1))
+
+    # # Scale to [0, 1] using MinMaxScaler
+    # scaler = MinMaxScaler(feature_range=(0, 1))
+    # frame_marker_df['paw_speed_normalized'] = scaler.fit_transform(transformed_speed).flatten()
+    
     states = state_labels # ['Still', 'Move', 'Wheel Turn', 'Groom']
 
 
@@ -357,24 +377,30 @@ def plot_paws_and_speed(gs, fig, data_df, frame, eid_inferred, cbar=False):
             state_data['paw_y_pos'],
             c=state_data['paw_speed_normalized'],
             cmap="plasma",
-            alpha=1,
+            alpha=0.8,
             marker='+',
             s=0.1,  # Marker size
-            label=f'{state} paw positions'
+            label=f'{state} paw positions',
+            vmin = 0,
+            vmax = 1
         )
         
         ax.set_title(f"Paw Positions: {state}")
         ax.axis('off')  # Hide axes for better visualization
 
-    cbar_ax = fig.add_subplot(gs[0, 3])
-    cbar_ax.axis('off')
-    if cbar:
-        # cbar = mpl.colorbar.ColorbarBase(cbar_ax, orientation='vertical', cmap='plasma',location='left')
-        cbar = fig.colorbar(sc, ax=cbar_ax, orientation='vertical', location='right', fraction=0.99)
-        cbar.set_label("Paw Speed")
-        cbar.set_ticks([0, 6, 12, 18, 24, 30])
-        cbar.set_ticklabels([0, 6, 12, 18, 24, "*30+"])
-        cbar.ax.yaxis.set_label_position('left')
+        # On the last subplot (e.g., the 'Groom' frame), add an inset colorbar if requested
+        if cbar and i == len(ax_paws) - 1:
+            # Create an inset axis on the right side of the current axis
+            cbaxes = inset_axes(ax, width="5%", height="100%", loc='center right', borderpad=0)
+            cbar_obj = fig.colorbar(sc, cax=cbaxes, orientation='vertical')
+            cbar_obj.outline.set_visible(True)  # Remove the outline if desired
+            # Remove numeric ticks
+            cbar_obj.set_ticks([])
+            # Manually add text labels for slow and fast
+            cbaxes.text(1.1, 0, 'slow', transform=cbaxes.transAxes,
+                        ha='left', va='bottom', color='black', fontsize=12, rotation=90)
+            cbaxes.text(1.1, 1, 'fast', transform=cbaxes.transAxes,
+                        ha='left', va='top', color='black', fontsize=12, rotation=90)
 
 def plot_state_durations(gs, fig, durations):
     ############# LOCATION #############
@@ -412,8 +438,13 @@ def plot_total_duration(gs, fig, durations):
     # Step 1: Calculate the total duration per state
     total_durations = durations.groupby('e_mode')['duration'].sum().reset_index()
 
-    # Optional: Sort the states by total duration (descending order)
-    total_durations.sort_values('duration', ascending=False, inplace=True)
+    # Set the 'e_mode' column as a categorical with the fixed order
+    # total_durations['e_mode'] = pd.Categorical(total_durations['e_mode'], categories=state_labels, ordered=True)
+    # total_durations.sort_values('e_mode', inplace=True)  # This will sort based on the fixed categorical order
+
+    # Compute percentage proportion for each state
+    total_sum = total_durations['duration'].sum()
+    total_durations['percentage'] = total_durations['duration'] / total_sum * 100
 
     color_map = {state: color for state, color in zip(state_labels, colors)}
     total_durations['color'] = total_durations['e_mode'].map(color_map)
@@ -422,7 +453,7 @@ def plot_total_duration(gs, fig, durations):
     ax = fig.add_subplot(gs[4, 0:2])
 
     cols = total_durations['color'].tolist()
-    bp = sns.barplot(data=total_durations, x='e_mode', y='duration', hue='e_mode', palette=cols, ax=ax, legend=False)
+    bp = sns.barplot(data=total_durations, x='e_mode', y='percentage', hue='e_mode', palette=cols, ax=ax, legend=False, order=state_labels)
 
     for i in bp.containers:
         bp.bar_label(i, padding=3, fmt="%.1f", label_type='center')  # Add padding and format numbers
@@ -430,22 +461,24 @@ def plot_total_duration(gs, fig, durations):
     # Add bar labels and ensure they stay within the chart
     # ax.set_title('Total Duration per State')
     ax.set_xlabel('States')
-    ax.set_ylabel('Total Duration (s)')
+    ax.set_ylabel('Total Duration (%)')
     ax.set_yscale('log')
 
-def plot_raster(er, vr, gs, fig, xlim = 120, fps = 60):
-    # plt.style.use('default')
+def plot_raster(er, vr, gs, fig, xlim = 2, fps = 60):
+    
+    # xlim means 2 seconds so the number of frames should be 2 * fps
+    xlim = xlim * fps
+    
     colors = ['red', 'blue', 'green', 'purple']
     cmap = ListedColormap(colors)
 
-    # fig, axs = plt.subplots(1,3, figsize=(20, 10), dpi=300)
-
     ens_ax = fig.add_subplot(gs[0:5, 5:7])
     var_ax = fig.add_subplot(gs[0:5, 7:9])
+    
 
     # Convert frames to seconds
-    x_ticks = np.linspace(-20 / fps, (xlim - 20) / fps, 10)  # 10 ticks, starting from -20 frames
-
+    # x_ticks = np.linspace(-20 / fps, (xlim - 20) / fps, 10)  # 10 ticks, starting from -20 frames
+    x_ticks = np.linspace(-0.5, 1.5, 9)  # 10 ticks, 
 
     sns.heatmap(er, cmap=cmap, cbar=False, ax=ens_ax)
     ens_ax.set_title("Raster of Ensemble Mode States")
@@ -469,14 +502,14 @@ def plot_raster(er, vr, gs, fig, xlim = 120, fps = 60):
     ens_ax.set_ylabel("")
     
     ens_ax.set_xlim(0, xlim)
-    ens_ax.set_xticks(np.linspace(0, xlim, 10))  # 10 evenly spaced ticks
-    ens_ax.set_xticklabels([f"{tick:.2f}s" for tick in x_ticks], rotation = 0)  # Format as seconds
+    ens_ax.set_xticks(np.linspace(0, xlim, 9))  # 10 evenly spaced ticks
+    ens_ax.set_xticklabels([f"{tick:.1f}s" for tick in x_ticks], rotation = 0)  # Format as seconds
     # vertical line at 20 for first movement onset
-    ens_ax.axvline(x=20, color='black', linestyle='--')
+    ens_ax.axvline(x=fps/2, color='black', linestyle='--')
 
 
     sns.heatmap(vr, cmap="gray", cbar=False, ax=var_ax, cbar_kws={"aspect": 100, "shrink": 1, "pad": 0.01})
-    var_ax.axvline(x=20, color='white', linestyle='--')
+    var_ax.axvline(x=fps/2, color='white', linestyle='--')
     # sns.heatmap(vr, cmap="rocket", cbar=True, ax=var_ax,)
     var_ax.set_title("Raster of Ensemble Mode Variance")
     var_ax.set_xlabel("Time from first movement onset (s)")
@@ -485,8 +518,8 @@ def plot_raster(er, vr, gs, fig, xlim = 120, fps = 60):
     var_ax.set_xlim(0, xlim)
 
     # Set ticks and labels
-    var_ax.set_xticks(np.linspace(0, xlim, 10))  # 10 evenly spaced ticks
-    var_ax.set_xticklabels([f"{tick:.2f}s" for tick in x_ticks], rotation=0)  # Format as seconds
+    var_ax.set_xticks(np.linspace(0, xlim, 9))  # 10 evenly spaced ticks
+    var_ax.set_xticklabels([f"{tick:.1f}s" for tick in x_ticks], rotation=0)  # Format as seconds
 
 def plot_vert_info(gs, fig, correct_info, trial_duration, yticks = None):
     # Create a nested GridSpec to split the single column (gs[:, 4]) into smaller sub-columns

@@ -24,12 +24,12 @@ one = ONE(password='international')
 
 class IBLMarkerExtractor(Pipe):
 
-    def __init__(self, label: str, path, smooth, mtype = "DLC") -> None:
+    def __init__(self, label: str, path, smooth, view, paw, mtype = "DLC") -> None:
         super().__init__(label)
         self.path = path
         self.l_thresh = 0.0
-        self.view = 'left'
-        self.paw = 'paw_r'
+        self.view = view
+        self.paw = paw
         self.smooth = smooth
         self.mtype = mtype
 
