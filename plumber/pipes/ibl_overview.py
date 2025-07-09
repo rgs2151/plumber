@@ -64,8 +64,6 @@ class OverviewPlotter(Pipe):
         os.makedirs(self.export_path, exist_ok=True)
     
     def pipe(self, inputs):
-        # print(inputs)
-        # self.eid = inputs["eid_stream"]["eid"]
         self.preds = inputs["ens"]
 
         vid_url = vidio.url_from_eid(self.eid, one=one)[self.view]
