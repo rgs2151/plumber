@@ -26,6 +26,13 @@ Plumber is a lightweight Python framework for building directed acyclic graph (D
 
 ## 🚀 Quick Start
 
+### Installation
+
+```bash
+conda create -n plumber python=3.10
+pip install -r requirements.txt
+```
+
 ### Basic Pipeline Example
 
 ```python

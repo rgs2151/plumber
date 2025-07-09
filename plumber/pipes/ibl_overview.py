@@ -48,7 +48,17 @@ state_map = np.vectorize(lambda x: state_keys[x])
 
 
 class OverviewPlotter(Pipe):
-    def __init__(self, label: str, artifact_path, mtype, eid, view, paw) -> None:
+    def __init__(self, label: str, artifact_path, mtype, eid, view = "left", paw = "paw_l") -> None:
+        """
+        Initialize the OverviewPlotter.
+        Args:
+            label (str): The label for the pipe.
+            artifact_path (str): Path to save the artifacts.
+            mtype (str): Marker type, e.g., 'DLC' or 'LP'.
+            eid (str): IBL EID.
+            view (str): Camera view, e.g., 'left' or 'right'.
+            paw (str): Paw type, e.g., 'paw_l' or 'paw_r'.
+        """
         super().__init__(label)
         self.mtype = mtype
         self.eid = eid
@@ -63,8 +73,17 @@ class OverviewPlotter(Pipe):
         # Make this directory if it doesn't exist
         os.makedirs(self.export_path, exist_ok=True)
     
-    def pipe(self, inputs):
-        self.preds = inputs["ens"]
+    def plot(self, daart_outputs):
+        """
+        The main function that runs the overview plotter.
+        Args:
+            inputs (dict): Daart outputs from:
+                ``` python
+                    tmp = self.model.predict_labels(data_gen, return_scores=True)
+                    daart_outputs = np.argmax(np.vstack(tmp['labels'][0]), axis=1)
+                ```
+        """
+        self.preds = daart_outputs
 
         vid_url = vidio.url_from_eid(self.eid, one=one)[self.view]
         fps, frame = get_video_frames(vid_url)
@@ -104,7 +123,12 @@ class OverviewPlotter(Pipe):
         output_path = self.export_path + f'{self.eid}_overview.jpg'
         fig.savefig(output_path, bbox_inches='tight')
         plt.close(fig)
-
+        
+        return output_path
+        
+    
+    def pipe(self, inputs):
+        output_path = self.plot(inputs["ens"])
         return {"eid": self.eid, "output_path": output_path}
 
 ####################################################
@@ -611,48 +635,4 @@ def plt_ens_var_hist(gs, fig, data_df):
     ax.set_xlim(0, 1)
     ax.set_ylabel("Frequency")
     ax.set_yscale('log')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
