@@ -47,7 +47,7 @@ state_keys = {1: 'Still', 2: 'Move', 3: 'Wheel Turn', 4: 'Groom'}
 state_map = np.vectorize(lambda x: state_keys[x])
 
 
-class OverviewPlotter(Pipe):
+class OverviewPlotter(Pipe): # Remove the Pipe inheritance if taking this outside plumber (e.g., standalone script)
     def __init__(self, label: str, artifact_path, mtype, eid, view = "left", paw = "paw_l") -> None:
         """
         Initialize the OverviewPlotter.
